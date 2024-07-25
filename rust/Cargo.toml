@@ -8,6 +8,7 @@ resolver = "2"
 
 [dependencies]
 bitcoin = { version = "0.32", features = ["bitcoinconsensus"] }
+bitcoin_hashes = "0.14.0"
 hex = "0.4.3"
 rand = "0.8.5"
 rayon = "1.10.0"
