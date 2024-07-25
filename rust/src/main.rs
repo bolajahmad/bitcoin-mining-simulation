@@ -2,11 +2,14 @@ use std::path::PathBuf;
 use std::fs;
 
 use bitcoin_hashes::{sha256d, sha256t_hash_newtype};
-use bitcoin::{block::Header};
+// use bitcoin::{block::Header};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TxId(pub Vec<u8>);
+
+#[derive(Debug)]
+pub struct TxMerkleNode(pub Vec<u8>);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Version(pub i32);
@@ -46,6 +49,16 @@ struct TxIn {
     sequence: u32,
 }
 
+
+#[derive(Debug)]
+pub struct Header {
+    pub version: Version,
+    // a hash of all transactions in the block
+    pub merkle_root: TxMerkleNode,
+    pub time: u32,
+    pub none: u32,
+}
+
 /// Mining a Bitcoin transaction is done
 /// Fill a candidate block with transactions
 /// Transactions can be gotten from the mempool
@@ -53,8 +66,24 @@ struct TxIn {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Block {
-    // header: Header,
+    header: Header,
     transactions: Vec<Transaction>
+}
+
+impl<'de> Deserialize<'de> for Header {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        Deserialize::deserialize(deserializer)
+    }
+}
+
+impl Serialize for Header {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        Serialize::serialize(&self, serializer)
+    }
 }
 
 fn main() {
