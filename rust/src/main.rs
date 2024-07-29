@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::fs;
 
 use bitcoin::{
-    block::{Header, Version as HVersion}, transaction::Version, Amount, BlockHash, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness
+    block::{Header, Version as HVersion}, transaction::Version, Amount, BlockHash, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness
 };
+use sha2::{Sha256, Digest};
 use bitcoin_hashes::{sha256, sha256d, Hash};
 // use bitcoin::{block::Header};
 use serde::{Deserialize, Serialize};
@@ -89,7 +90,7 @@ fn main() {
     let manifest_path = PathBuf::from("mempool");
 
     let mut transactions: Vec<Transaction> = Vec::with_capacity(10);
-    let tx_hashes = Vec::with_capacity(10);
+    let mut tx_hashes: Vec<&str> = Vec::with_capacity(10);
 
     // Pick transaction in the mempool, based on index.
     // Delete processed transaction(s) so other transactions will be processed.
@@ -116,8 +117,10 @@ fn main() {
                         let processed_tx = tx.process_transaction();
                         match processed_tx {
                             Some(tx) => {
+                                // let ntxid = tx.compute_ntxid().as_byte_array();
+                                // tx_hashes.push(std::str::from_utf8(ntxid).unwrap());
                                 transactions.push(tx);
-                                tx_hashes.push(tx.compute_ntxid());
+                                // println!("Transaction: {:?}", ntxid);
                             }
                             None => {
                                 println!("Error: Unable to process transaction");
@@ -134,40 +137,58 @@ fn main() {
             println!("Error: {}", e);
         }
     }
-
     // Create the block header
     // Previous block hash
     let prev_blockhash = BlockHash::from_raw_hash(sha256d::Hash::from_byte_array(
         string_to_array_size32("0000000000000000000000000000000000000000000000000000000000000000")
     ));
-
-    let merkle_root = ;
+    let merkle_root = calculate_merkle_root(tx_hashes);
+    
+    println!("Merkle Root: {:?}", merkle_root);
     let mut header = Header {
         version: HVersion::ONE,
         prev_blockhash,
-        merkle_root: Default::default(),
+        merkle_root: TxMerkleNode::from_raw_hash(sha256d::Hash::from_byte_array(string_to_array_size32(std::str::from_utf8(&merkle_root).unwrap()))),
         time: 0,
-        bits: 0,
+        bits: CompactTarget::from_hex("0").unwrap(),
         nonce: 0,
     };
 }
 
-// fn pair_and_hash<T: Hash>(hash1: &T, hash2: &T) -> T {
-    
-// }
+fn pair_and_hash(hash1: &[u8], hash2: &[u8]) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(hash1);
+    hasher.update(hash2);
+    hasher.finalize().to_vec()
+}
 
-fn calculate_merkle_root<T: Hash>(mut txs: Vec<T>) -> T {
-    while txs.len() > 1 {
-        if txs.len() % 2 != 0 {
-            txs.push(txs.last().unwrap().clone());
+fn calculate_merkle_root(txs: Vec<&str>) -> Vec<u8> {
+    let mut inner_txs = txs.clone();
+    let mut new_txs: Vec<String> = Vec::new();
+    while inner_txs.len() > 1 {
+        if inner_txs.len() % 2 != 0 {
+            inner_txs.push(txs.last().unwrap().clone());
         }
 
-        let mut new_txs = Vec::new();
+        
+        // let mut temp_txs: Vec<String> = Vec::new();
+        for i in (0..inner_txs.len()).step_by(2) {
+            let hash1 = &inner_txs[i].as_bytes();
+            let hash2 = &inner_txs[i + 1].as_bytes();
 
-        for i in (o..txs.len()).step_by(2) {
-            new_txs.push()
+            println!("Generated Hashes: {:?}, {:?}", hash1, hash2);
+            let combined_hash = pair_and_hash(
+                hash1,
+                hash2
+            );
+            let result = String::from_utf8(combined_hash).unwrap();
+            new_txs.push(result);
         }
+        
     }
+    let txs = new_txs;
+
+    txs[0].as_bytes().to_vec()
 }
 
 fn string_to_array_size32(input: &str) -> [u8; 32] {
