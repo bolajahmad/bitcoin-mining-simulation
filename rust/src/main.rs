@@ -1,10 +1,20 @@
-use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs::File, path::PathBuf};
 use std::fs;
 
+use base64::write;
+use bitcoin::consensus::Encodable;
+use bitcoin::hex::DisplayHex;
+use bitcoin::Target;
 use bitcoin::{
-    block::{Header, Version as HVersion}, transaction::Version, Amount, BlockHash, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness
+    block::{Header, Version as HVersion}, transaction::Version, 
+    Amount, Block, BlockHash, CompactTarget, OutPoint, ScriptBuf,
+    Sequence, Transaction, TxIn, TxMerkleNode, TxOut, Txid, Witness,
+    hashes::sha256d::Hash as DHash,
 };
 use sha2::{Sha256, Digest};
+use std::io::Write;
 use bitcoin_hashes::{sha256, sha256d, Hash};
 // use bitcoin::{block::Header};
 use serde::{Deserialize, Serialize};
@@ -85,12 +95,42 @@ impl RawTransaction {
     }
 }
 
+fn define_coinbase_tx() -> Transaction {
+    let input: Vec<TxIn> = Vec::from([TxIn {
+        previous_output: OutPoint::default(),
+        script_sig: ScriptBuf::default(),
+        sequence: Sequence::MAX,
+        witness: Witness::from_slice(&vec![b"0000000", b"1233212"].to_vec())
+    }]);
+
+    let output: Vec<TxOut> = Vec::from([
+        TxOut {
+            value: Amount::from_int_btc(50),
+            script_pubkey: ScriptBuf::new(),
+        },
+        TxOut {
+            value: Amount::from_int_btc(50),
+            script_pubkey: ScriptBuf::new(),
+        }
+    ]);
+
+    Transaction {
+        version: Version(1),
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input,
+        output,
+    }
+}
+
 fn main() {
     // Need to be able to read the files from the mempool folder they're located in
     let manifest_path = PathBuf::from("mempool");
 
     let mut transactions: Vec<Transaction> = Vec::with_capacity(10);
-    let mut tx_hashes: Vec<&str> = Vec::with_capacity(10);
+
+    // push coinbase transaction
+    let coinbase = define_coinbase_tx();
+    transactions.push(coinbase);
 
     // Pick transaction in the mempool, based on index.
     // Delete processed transaction(s) so other transactions will be processed.
@@ -102,8 +142,6 @@ fn main() {
                 }
                 let entry = entry.unwrap();
                 let path = entry.path();
-                let file_name = &path.file_name().unwrap().to_str().unwrap();
-                println!("File name: {}", file_name);
 
                 // read the file to process the transaction
                 let transaction_content = fs::read_to_string(path).unwrap();
@@ -117,10 +155,7 @@ fn main() {
                         let processed_tx = tx.process_transaction();
                         match processed_tx {
                             Some(tx) => {
-                                // let ntxid = tx.compute_ntxid().as_byte_array();
-                                // tx_hashes.push(std::str::from_utf8(ntxid).unwrap());
                                 transactions.push(tx);
-                                // println!("Transaction: {:?}", ntxid);
                             }
                             None => {
                                 println!("Error: Unable to process transaction");
@@ -137,58 +172,58 @@ fn main() {
             println!("Error: {}", e);
         }
     }
+    // println!("Blockhash value gotten: {:?}", string_to_array_size32());
     // Create the block header
     // Previous block hash
-    let prev_blockhash = BlockHash::from_raw_hash(sha256d::Hash::from_byte_array(
-        string_to_array_size32("0000000000000000000000000000000000000000000000000000000000000000")
-    ));
-    let merkle_root = calculate_merkle_root(tx_hashes);
-    
-    println!("Merkle Root: {:?}", merkle_root);
-    let mut header = Header {
-        version: HVersion::ONE,
+    let prev_blockhash = BlockHash::from_raw_hash(DHash::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap());
+    let header = Header {
+        version: HVersion::from_consensus(5),
         prev_blockhash,
-        merkle_root: TxMerkleNode::from_raw_hash(sha256d::Hash::from_byte_array(string_to_array_size32(std::str::from_utf8(&merkle_root).unwrap()))),
-        time: 0,
-        bits: CompactTarget::from_hex("0").unwrap(),
+        merkle_root: TxMerkleNode::from_byte_array(string_to_array_size32("0000000000000000000000000000000000000000000000000000000000000000")),
+        time: SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32,
+        bits: Target::from_hex("0x0000ffff00000000000000000000000000000000000000000000000000000000").unwrap().to_compact_lossy(),
         nonce: 0,
     };
-}
+    let mut block = Block {
+        header,
+        txdata: transactions
+    };
+    block.header.merkle_root = block.compute_merkle_root().unwrap();
 
-fn pair_and_hash(hash1: &[u8], hash2: &[u8]) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(hash1);
-    hasher.update(hash2);
-    hasher.finalize().to_vec()
-}
+    println!("Block target: {:?}", header.target());
 
-fn calculate_merkle_root(txs: Vec<&str>) -> Vec<u8> {
-    let mut inner_txs = txs.clone();
-    let mut new_txs: Vec<String> = Vec::new();
-    while inner_txs.len() > 1 {
-        if inner_txs.len() % 2 != 0 {
-            inner_txs.push(txs.last().unwrap().clone());
-        }
-
-        
-        // let mut temp_txs: Vec<String> = Vec::new();
-        for i in (0..inner_txs.len()).step_by(2) {
-            let hash1 = &inner_txs[i].as_bytes();
-            let hash2 = &inner_txs[i + 1].as_bytes();
-
-            println!("Generated Hashes: {:?}, {:?}", hash1, hash2);
-            let combined_hash = pair_and_hash(
-                hash1,
-                hash2
-            );
-            let result = String::from_utf8(combined_hash).unwrap();
-            new_txs.push(result);
-        }
-        
+    let hash = block.block_hash();
+    println!("Hash of the Block, {:?}", hash);
+    
+    println!("Mining the block");
+    // Increment nonce till target is met
+    while !block.header.target().is_met_by(block.block_hash()) {
+        // println!("Nonce: {}", block.header.nonce);
+        block.header.nonce += 1;
     }
-    let txs = new_txs;
 
-    txs[0].as_bytes().to_vec()
+    // Create out.txt file
+    let mut file = File::create("out.txt").expect("Failed to create out.txt");
+
+    println!("Created file and writing header into");
+    // encode the block_header and write to out.txt
+    let encoded_header = &mut Vec::new();
+    block.header.consensus_encode(encoded_header).expect("Failed to encode header");
+    writeln!(file, "{}", encoded_header.as_hex()).expect("Write header to file failed");
+
+    // Write serialized coinbase transaction to out.txt
+    let coinbasetx = block.coinbase().unwrap();
+    let mut encoded_coinbase = Vec::new();
+    coinbasetx.consensus_encode(&mut encoded_coinbase).expect("Failed to encode coinbase");
+    writeln!(file, "{}", encoded_coinbase.as_hex()).expect("Write coinbase to file failed");
+
+    // Write transaction IDs
+    for tx in block.txdata.iter() {
+        writeln!(file, "{}", tx.compute_txid()).expect("Write transaction to file failed");
+    }
 }
 
 fn string_to_array_size32(input: &str) -> [u8; 32] {
