@@ -96,11 +96,12 @@ impl RawTransaction {
 }
 
 fn define_coinbase_tx() -> Transaction {
+    let witness: Vec<[u8; 32]> = vec![[0; 32]];
     let input: Vec<TxIn> = Vec::from([TxIn {
         previous_output: OutPoint::default(),
-        script_sig: ScriptBuf::default(),
+        script_sig: ScriptBuf::from_bytes("Block mined by bolajahmad".as_bytes().to_vec()),
         sequence: Sequence::MAX,
-        witness: Witness::from_slice(&vec![b"0000000", b"1233212"].to_vec())
+        witness: Witness::from_slice(&witness)
     }]);
 
     let output: Vec<TxOut> = Vec::from([
