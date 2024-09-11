@@ -223,6 +223,7 @@ fn main() {
 
     // Write transaction IDs
     for tx in block.txdata.iter() {
+        println!("Transaction ID: {}", tx.compute_txid());
         writeln!(file, "{}", tx.compute_txid()).expect("Write transaction to file failed");
     }
 }
